@@ -4,15 +4,13 @@
 
 /* States for the polling state machine. */
 typedef enum {
-    HSDS_EMPTY,                 /* no input to process */
-    HSDS_INPUT_AVAILABLE,       /* new input, completely unprocessed */
+    HSDS_TAG_BIT,               /* tag bit */
     HSDS_YIELD_LITERAL,         /* ready to yield literal byte */
     HSDS_BACKREF_INDEX_MSB,     /* most significant byte of index */
     HSDS_BACKREF_INDEX_LSB,     /* least significant byte of index */
     HSDS_BACKREF_COUNT_MSB,     /* most significant byte of count */
     HSDS_BACKREF_COUNT_LSB,     /* least significant byte of count */
     HSDS_YIELD_BACKREF,         /* ready to yield back-reference */
-    HSDS_CHECK_FOR_MORE_INPUT,  /* check if input is exhausted */
 } HSD_state;
 
 #if HEATSHRINK_DEBUGGING_LOGS
@@ -22,15 +20,13 @@ typedef enum {
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
 #define ASSERT(X) assert(X)
 static const char *state_names[] = {
-    "empty",
-    "input_available",
+    "tag_bit",
     "yield_literal",
     "backref_index_msb",
     "backref_index_lsb",
     "backref_count_msb",
     "backref_count_lsb",
     "yield_backref",
-    "check_for_more_input",
 };
 #else
 #define LOG(...) /* no-op */
@@ -85,7 +81,7 @@ void heatshrink_decoder_reset(heatshrink_decoder *hsd) {
     size_t buf_sz = 1 << HEATSHRINK_DECODER_WINDOW_BITS(hsd);
     size_t input_sz = HEATSHRINK_DECODER_INPUT_BUFFER_SIZE(hsd);
     memset(hsd->buffers, 0, buf_sz + input_sz);
-    hsd->state = HSDS_EMPTY;
+    hsd->state = HSDS_TAG_BIT;
     hsd->input_size = 0;
     hsd->input_index = 0;
     hsd->bit_index = 0x00;
@@ -114,10 +110,6 @@ HSD_sink_res heatshrink_decoder_sink(heatshrink_decoder *hsd,
     /* copy into input buffer (at head of buffers) */
     memcpy(&hsd->buffers[hsd->input_size], in_buf, size);
     hsd->input_size += size;
-    if (hsd->state == HSDS_EMPTY) {
-        hsd->state = HSDS_INPUT_AVAILABLE;
-        hsd->input_index = 0;
-    }
     *input_size = size;
     return HSDR_SINK_OK;
 }
@@ -131,7 +123,7 @@ HSD_sink_res heatshrink_decoder_sink(heatshrink_decoder *hsd,
 #define BACKREF_INDEX_BITS(HSD) (HEATSHRINK_DECODER_WINDOW_BITS(HSD))
 
 // States
-static HSD_state st_input_available(heatshrink_decoder *hsd);
+static HSD_state st_tag_bit(heatshrink_decoder *hsd);
 static HSD_state st_yield_literal(heatshrink_decoder *hsd,
     output_info *oi);
 static HSD_state st_backref_index_msb(heatshrink_decoder *hsd);
@@ -140,7 +132,6 @@ static HSD_state st_backref_count_msb(heatshrink_decoder *hsd);
 static HSD_state st_backref_count_lsb(heatshrink_decoder *hsd);
 static HSD_state st_yield_backref(heatshrink_decoder *hsd,
     output_info *oi);
-static HSD_state st_check_for_input(heatshrink_decoder *hsd);
 
 HSD_poll_res heatshrink_decoder_poll(heatshrink_decoder *hsd,
         uint8_t *out_buf, size_t out_buf_size, size_t *output_size) {
@@ -159,10 +150,8 @@ HSD_poll_res heatshrink_decoder_poll(heatshrink_decoder *hsd,
             hsd->state, state_names[hsd->state], hsd->input_size);
         uint8_t in_state = hsd->state;
         switch (in_state) {
-        case HSDS_EMPTY:
-            return HSDR_POLL_EMPTY;
-        case HSDS_INPUT_AVAILABLE:
-            hsd->state = st_input_available(hsd);
+        case HSDS_TAG_BIT:
+            hsd->state = st_tag_bit(hsd);
             break;
         case HSDS_YIELD_LITERAL:
             hsd->state = st_yield_literal(hsd, &oi);
@@ -182,9 +171,6 @@ HSD_poll_res heatshrink_decoder_poll(heatshrink_decoder *hsd,
         case HSDS_YIELD_BACKREF:
             hsd->state = st_yield_backref(hsd, &oi);
             break;
-        case HSDS_CHECK_FOR_MORE_INPUT:
-            hsd->state = st_check_for_input(hsd);
-            break;
         default:
             return HSDR_POLL_ERROR_UNKNOWN;
         }
@@ -198,9 +184,11 @@ HSD_poll_res heatshrink_decoder_poll(heatshrink_decoder *hsd,
     }
 }
 
-static HSD_state st_input_available(heatshrink_decoder *hsd) {
+static HSD_state st_tag_bit(heatshrink_decoder *hsd) {
     uint32_t bits = get_bits(hsd, 1);  // get tag bit
-    if (bits) {
+    if (bits == NO_BITS) {
+        return HSDS_TAG_BIT;
+    } else if (bits) {
         return HSDS_YIELD_LITERAL;
     } else if (HEATSHRINK_DECODER_WINDOW_BITS(hsd) > 8) {
         return HSDS_BACKREF_INDEX_MSB;
@@ -224,7 +212,7 @@ static HSD_state st_yield_literal(heatshrink_decoder *hsd,
         LOG("-- emitting literal byte 0x%02x ('%c')\n", c, isprint(c) ? c : '.');
         buf[hsd->head_index++ & mask] = c;
         push_byte(hsd, oi, c);
-        return HSDS_CHECK_FOR_MORE_INPUT;
+        return HSDS_TAG_BIT;
     } else {
         return HSDS_YIELD_LITERAL;
     }
@@ -293,15 +281,11 @@ static HSD_state st_yield_backref(heatshrink_decoder *hsd,
             LOG("  -- ++ 0x%02x\n", c);
         }
         hsd->output_count -= count;
-        if (hsd->output_count == 0) { return HSDS_CHECK_FOR_MORE_INPUT; }
+        if (hsd->output_count == 0) { return HSDS_TAG_BIT; }
     }
     return HSDS_YIELD_BACKREF;
 }
 
-static HSD_state st_check_for_input(heatshrink_decoder *hsd) {
-    return (hsd->input_size == 0) ? HSDS_EMPTY : HSDS_INPUT_AVAILABLE;
-}
-    
 /* Get the next COUNT bits from the input buffer, saving incremental progress.
  * Returns NO_BITS on end of input, or if more than 31 bits are requested. */
 static uint32_t get_bits(heatshrink_decoder *hsd, uint8_t count) {
@@ -356,8 +340,8 @@ static uint32_t get_bits(heatshrink_decoder *hsd, uint8_t count) {
 HSD_finish_res heatshrink_decoder_finish(heatshrink_decoder *hsd) {
     if (hsd == NULL) { return HSDR_FINISH_ERROR_NULL; }
     switch (hsd->state) {
-    case HSDS_EMPTY:
-        return HSDR_FINISH_DONE;
+    case HSDS_TAG_BIT:
+        return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
     /* If we want to finish with no input, but are in these states, it's
      * because the 0-bit padding to the last byte looks like a backref
@@ -365,12 +349,11 @@ HSD_finish_res heatshrink_decoder_finish(heatshrink_decoder *hsd) {
     case HSDS_BACKREF_INDEX_LSB:
     case HSDS_BACKREF_INDEX_MSB:
     case HSDS_BACKREF_COUNT_LSB:
-    case HSDS_BACKREF_COUNT_MSB:
         return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
-    /* If the output stream is padded with 0xFFs (possibly due to being in
-     * flash memory), also explicitly check the input size rather than
-     * uselessly returning MORE but yielding 0 bytes when polling. */
+    /* If we want to finish with no input, but are in thise state, it's
+     * because the 1-bit added to the last byte looks like a literal
+     * marker bit followed by 0s. */
     case HSDS_YIELD_LITERAL:
         return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
