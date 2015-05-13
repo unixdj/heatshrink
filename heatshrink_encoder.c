@@ -402,7 +402,7 @@ static HSE_state st_flush_bit_buffer(heatshrink_encoder *hse,
         return HSES_DONE;
     } else if (can_take_byte(oi)) {
         LOG("-- flushing remaining byte (bit_index == 0x%02x)\n", hse->bit_index);
-        oi->buf[(*oi->output_size)++] = hse->current_byte;
+        oi->buf[(*oi->output_size)++] = hse->current_byte | hse->bit_index;
         LOG("-- done!\n");
         return HSES_DONE;
     } else {

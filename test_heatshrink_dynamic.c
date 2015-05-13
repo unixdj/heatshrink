@@ -114,7 +114,7 @@ TEST encoder_should_emit_data_without_repetitions_as_literal_sequence(void) {
     uint8_t input[5];
     uint8_t output[1024];
     size_t copied = 0;
-    uint8_t expected[] = { 0x80, 0x40, 0x60, 0x50, 0x38, 0x20 };
+    uint8_t expected[] = { 0x80, 0x40, 0x60, 0x50, 0x38, 0x24 };
 
     for (int i=0; i<5; i++) { input[i] = i; }
     memset(output, 0, 1024);
@@ -150,7 +150,7 @@ TEST encoder_should_emit_series_of_same_byte_as_literal_then_backref(void) {
     uint8_t input[5];
     uint8_t output[1024];
     size_t copied = 0;
-    uint8_t expected[] = {0xb0, 0x80, 0x01, 0x80};
+    uint8_t expected[] = {0xb0, 0x80, 0x01, 0xc0};
 
     for (int i=0; i<5; i++) { input[i] = 'a'; } /* "aaaaa" */
     memset(output, 0, 1024);
@@ -210,7 +210,7 @@ TEST encoder_poll_should_detect_repeated_substring_and_preserve_trailing_literal
     heatshrink_encoder *hse = heatshrink_encoder_alloc(8, 3);
     uint8_t input[] = {'a', 'b', 'c', 'd', 'a', 'b', 'c', 'd', 'e'};
     uint8_t output[1024];
-    uint8_t expected[] = {0xb0, 0xd8, 0xac, 0x76, 0x40, 0x1b, 0xb2, 0x80 };
+    uint8_t expected[] = {0xb0, 0xd8, 0xac, 0x76, 0x40, 0x1b, 0xb2, 0xc0 };
     size_t copied = 0;
     memset(output, 0, 1024);
     HSE_sink_res sres = heatshrink_encoder_sink(hse,
@@ -508,7 +508,7 @@ TEST decoder_finish_should_reject_null_input(void) {
 }
 
 TEST decoder_finish_should_note_when_done(void) {
-    uint8_t input[] = {0xb3, 0x5b, 0xed, 0xe0, 0x40, 0x80}; //"foofoo"
+    uint8_t input[] = {0xb3, 0x5b, 0xed, 0xe0, 0x40, 0xa0}; //"foofoo"
 
     uint8_t output[7];
     heatshrink_decoder *hsd = heatshrink_decoder_alloc(256, 7, 7);
