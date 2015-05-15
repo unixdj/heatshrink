@@ -402,7 +402,7 @@ static HSE_state st_flush_bit_buffer(heatshrink_encoder *hse,
         return HSES_DONE;
     } else if (can_take_byte(oi)) {
         LOG("-- flushing remaining byte (bit_index == 0x%02x)\n", hse->bit_index);
-        oi->buf[(*oi->output_size)++] = hse->current_byte;
+        oi->buf[(*oi->output_size)++] = hse->current_byte | hse->bit_index;
         LOG("-- done!\n");
         return HSES_DONE;
     } else {
@@ -502,7 +502,9 @@ static uint16_t find_longest_match(heatshrink_encoder *hse, uint16_t start,
 
     uint16_t match_maxlen = 0;
     uint16_t match_index = MATCH_NOT_FOUND;
-    const uint16_t break_even_point = 3;
+    const uint16_t break_even_point =
+        (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
+         HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse) + 9) / 9;
     uint16_t len = 0;
     uint8_t * const needlepoint = &buf[end];
 #if HEATSHRINK_USE_INDEX
