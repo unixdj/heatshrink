@@ -352,9 +352,9 @@ HSD_finish_res heatshrink_decoder_finish(heatshrink_decoder *hsd) {
     case HSDS_BACKREF_COUNT_MSB:
         return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
-    /* If the output stream is padded with 0xFFs (possibly due to being in
-     * flash memory), also explicitly check the input size rather than
-     * uselessly returning MORE but yielding 0 bytes when polling. */
+    /* If we want to finish with no input, but are in thise state, it's
+     * because the 1-bit added to the last byte looks like a literal
+     * marker bit followed by 0s. */
     case HSDS_YIELD_LITERAL:
         return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
