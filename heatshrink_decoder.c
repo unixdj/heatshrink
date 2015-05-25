@@ -349,6 +349,7 @@ HSD_finish_res heatshrink_decoder_finish(heatshrink_decoder *hsd) {
     case HSDS_BACKREF_INDEX_LSB:
     case HSDS_BACKREF_INDEX_MSB:
     case HSDS_BACKREF_COUNT_LSB:
+    case HSDS_BACKREF_COUNT_MSB:
         return hsd->input_size == 0 ? HSDR_FINISH_DONE : HSDR_FINISH_MORE;
 
     /* If we want to finish with no input, but are in thise state, it's
