@@ -42,8 +42,6 @@ static const char *state_names[] = {
 // Encoder flags
 enum {
     FLAG_IS_FINISHING = 0x01,
-    FLAG_HAS_LITERAL = 0x02,
-    FLAG_ON_FINAL_LITERAL = 0x04,
 };
 
 typedef struct {
@@ -60,9 +58,7 @@ static uint16_t get_lookahead_size(heatshrink_encoder *hse);
 static void add_tag_bit(heatshrink_encoder *hse, output_info *oi, uint8_t tag);
 static int can_take_byte(output_info *oi);
 static int is_finishing(heatshrink_encoder *hse);
-static int on_final_literal(heatshrink_encoder *hse);
 static void save_backlog(heatshrink_encoder *hse);
-static int has_literal(heatshrink_encoder *hse);
 
 /* Push COUNT (max 8) bits to the output buffer, which has room. */
 static void push_bits(heatshrink_encoder *hse, uint8_t count, uint8_t bits,
@@ -292,7 +288,6 @@ static HSE_state st_step_search(heatshrink_encoder *hse) {
     if (match_pos == MATCH_NOT_FOUND) {
         LOG("ss Match not found\n");
         hse->match_scan_index++;
-        hse->flags |= FLAG_HAS_LITERAL;
         hse->match_length = 0;
         return HSES_YIELD_TAG_BIT;
     } else {
@@ -326,9 +321,7 @@ static HSE_state st_yield_literal(heatshrink_encoder *hse,
         output_info *oi) {
     if (can_take_byte(oi)) {
         push_literal_byte(hse, oi);
-        hse->flags &= ~FLAG_HAS_LITERAL;
-        if (on_final_literal(hse)) { return HSES_FLUSH_BITS; }
-        return hse->match_length > 0 ? HSES_YIELD_TAG_BIT : HSES_SEARCH;
+        return HSES_SEARCH;
     } else {
         return HSES_YIELD_LITERAL;
     }
@@ -368,13 +361,7 @@ static HSE_state st_yield_br_length(heatshrink_encoder *hse,
 
 static HSE_state st_save_backlog(heatshrink_encoder *hse) {
     if (is_finishing(hse)) {
-        /* copy remaining literal (if necessary) */
-        if (has_literal(hse)) {
-            hse->flags |= FLAG_ON_FINAL_LITERAL;
-            return HSES_YIELD_TAG_BIT;
-        } else {
-            return HSES_FLUSH_BITS;
-        }
+        return HSES_FLUSH_BITS;
     } else {
         LOG("-- saving backlog\n");
         save_backlog(hse);
@@ -457,14 +444,6 @@ static void do_indexing(heatshrink_encoder *hse) {
 
 static int is_finishing(heatshrink_encoder *hse) {
     return hse->flags & FLAG_IS_FINISHING;
-}
-
-static int on_final_literal(heatshrink_encoder *hse) {
-    return hse->flags & FLAG_ON_FINAL_LITERAL;
-}
-
-static int has_literal(heatshrink_encoder *hse) {
-    return (hse->flags & FLAG_HAS_LITERAL);
 }
 
 static int can_take_byte(output_info *oi) {
