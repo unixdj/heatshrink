@@ -171,7 +171,7 @@ HSE_sink_res heatshrink_encoder_sink(heatshrink_encoder *hse,
  ***************/
 
 static uint16_t find_longest_match(heatshrink_encoder *hse, uint16_t start,
-    uint16_t end, const uint16_t maxlen, uint16_t *match_length);
+    uint16_t end, uint16_t maxlen, uint16_t *match_length);
 static void do_indexing(heatshrink_encoder *hse);
 
 static HSE_state st_step_search(heatshrink_encoder *hse);
@@ -449,18 +449,29 @@ static int can_take_byte(output_info *oi) {
 /* Return the longest match for the bytes at buf[end:end+maxlen] between
  * buf[start] and buf[end-1]. If no match is found, return -1. */
 static uint16_t find_longest_match(heatshrink_encoder *hse, uint16_t start,
-        uint16_t end, const uint16_t maxlen, uint16_t *match_length) {
+        uint16_t end, uint16_t maxlen, uint16_t *match_length) {
     LOG("-- scanning for match of buf[%u:%u] between buf[%u:%u] (max %u bytes)\n",
         end, end + maxlen, start, end + maxlen - 1, maxlen);
     uint8_t *buf = hse->buffer;
 
     uint16_t match_maxlen = 0;
+    uint16_t fw_match_maxlen = 0;
     uint16_t match_index = MATCH_NOT_FOUND;
+    const size_t break_even_point =
+      (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
+          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse)) / 9;
+    const uint8_t forward =
+        break_even_point && maxlen > break_even_point ? 1 : 0;
 
     uint16_t len = 0;
-    uint8_t * const needlepoint = &buf[end];
+    uint8_t * const needlepoint = &buf[end + forward];
 #if HEATSHRINK_USE_INDEX
     struct hs_index *hsi = HEATSHRINK_ENCODER_INDEX(hse);
+    if (forward) {
+	    end++;
+	    start++;
+	    maxlen--;
+    }
     int16_t pos = hsi->index[end];
 
     while (pos - (int16_t)start >= 0) {
@@ -480,10 +491,15 @@ static uint16_t find_longest_match(heatshrink_encoder *hse, uint16_t start,
         }
 
         if (len > match_maxlen) {
-            match_maxlen = len;
-            match_index = pos;
-            if (len == maxlen) { break; } /* won't find better */
-        }
+            if (len > fw_match_maxlen) {
+                fw_match_maxlen = len;
+            }
+            if (pospoint[-forward] == needlepoint[-forward]) {
+                match_maxlen = len;
+                match_index = pos;
+                if (match_maxlen == maxlen) { break; } /* won't find better */
+            }
+	}
         pos = hsi->index[pos];
     }
 #else    
@@ -506,19 +522,17 @@ static uint16_t find_longest_match(heatshrink_encoder *hse, uint16_t start,
         }
     }
 #endif
-    
-    const size_t break_even_point =
-      (1 + HEATSHRINK_ENCODER_WINDOW_BITS(hse) +
-          HEATSHRINK_ENCODER_LOOKAHEAD_BITS(hse));
 
     /* Instead of comparing break_even_point against 8*match_maxlen,
      * compare match_maxlen against break_even_point/8 to avoid
      * overflow. Since MIN_WINDOW_BITS and MIN_LOOKAHEAD_BITS are 4 and
      * 3, respectively, break_even_point/8 will always be at least 1. */
-    if (match_maxlen > (break_even_point / 8)) {
+        LOG("-- match: %u bytes at -%u, fw %u\n",
+            match_maxlen + forward, end - match_index, fw_match_maxlen);
+    if (match_maxlen + forward > break_even_point && fw_match_maxlen <= match_maxlen + forward) {
         LOG("-- best match: %u bytes at -%u\n",
-            match_maxlen, end - match_index);
-        *match_length = match_maxlen;
+            match_maxlen + forward, end - match_index);
+        *match_length = match_maxlen + forward;
         return end - match_index;
     }
     LOG("-- none found\n");
